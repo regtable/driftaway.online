@@ -439,10 +439,10 @@ function step(dt){
   if (roomClear){
     state.cleared.add(roomKey(rx, ry));
     let crossed=false;
-    if (state.player.x<left && state.player.y>doorY1 && state.player.y<doorY2){ state.player.x+=ROOM_W; crossed=true; }
-    else if (state.player.x>right && state.player.y>doorY1 && state.player.y<doorY2){ state.player.x-=ROOM_W; crossed=true; }
-    else if (state.player.y<top && state.player.x>doorX1 && state.player.x<doorX2){ state.player.y+=ROOM_H; crossed=true; }
-    else if (state.player.y>bottom && state.player.x>doorX1 && state.player.x<doorX2){ state.player.y-=ROOM_H; crossed=true; }
+    if (state.player.x<left && state.player.y>doorY1 && state.player.y<doorY2){ crossed=true; }
+    else if (state.player.x>right && state.player.y>doorY1 && state.player.y<doorY2){ crossed=true; }
+    else if (state.player.y<top && state.player.x>doorX1 && state.player.x<doorX2){ crossed=true; }
+    else if (state.player.y>bottom && state.player.x>doorX1 && state.player.x<doorX2){ crossed=true; }
     if (crossed){
       ensureRoom();
     } else {
