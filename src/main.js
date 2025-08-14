@@ -144,6 +144,7 @@ function resetState() {
     room:{x:0,y:0},
     visited:new Set(),
     cleared:new Set(),
+    openDoors:new Map(),
     enemies:[], bullets:[], ebullets:[], pickups:[], turrets:[],
     gold:0, depth:0,
     abilities:{
@@ -438,13 +439,17 @@ function step(dt){
 
   if (roomClear){
     state.cleared.add(roomKey(rx, ry));
-    let crossed=false;
-    if (state.player.x<left && state.player.y>doorY1 && state.player.y<doorY2){ crossed=true; }
-    else if (state.player.x>right && state.player.y>doorY1 && state.player.y<doorY2){ crossed=true; }
-    else if (state.player.y<top && state.player.x>doorX1 && state.player.x<doorX2){ crossed=true; }
-    else if (state.player.y>bottom && state.player.x>doorX1 && state.player.x<doorX2){ crossed=true; }
-    if (crossed){
+    let dir=null;
+    if (state.player.x<left && state.player.y>doorY1 && state.player.y<doorY2){ dir='left'; }
+    else if (state.player.x>right && state.player.y>doorY1 && state.player.y<doorY2){ dir='right'; }
+    else if (state.player.y<top && state.player.x>doorX1 && state.player.x<doorX2){ dir='up'; }
+    else if (state.player.y>bottom && state.player.x>doorX1 && state.player.x<doorX2){ dir='down'; }
+    if (dir){
       ensureRoom();
+      const opp={left:'right',right:'left',up:'down',down:'up'};
+      const key=roomKey(state.room.x,state.room.y);
+      if(!state.openDoors.has(key)) state.openDoors.set(key,new Set());
+      state.openDoors.get(key).add(opp[dir]);
     } else {
       state.player.x = clamp(state.player.x, left+WALL, right-WALL);
       state.player.y = clamp(state.player.y, top+WALL,  bottom-WALL);
@@ -554,6 +559,7 @@ function draw(){
     const x0=x*ROOM_W, y0=y*ROOM_H;
     const key=roomKey(x,y);
     const cleared=state.cleared.has(key);
+    const open=state.openDoors.get(key)||new Set();
     ctx.fillStyle='#1e293b';
     // top & bottom walls
     ctx.fillRect(x0, y0, ROOM_W*0.5-DOOR*0.5, WALL);
@@ -567,10 +573,10 @@ function draw(){
     ctx.fillRect(x0+ROOM_W-WALL, y0+ROOM_H*0.5+DOOR*0.5, WALL, ROOM_H*0.5-DOOR*0.5);
     if (!cleared){
       ctx.fillStyle='#475569';
-      ctx.fillRect(x0+ROOM_W*0.5-DOOR*0.5, y0, DOOR, WALL);
-      ctx.fillRect(x0+ROOM_W*0.5-DOOR*0.5, y0+ROOM_H-WALL, DOOR, WALL);
-      ctx.fillRect(x0, y0+ROOM_H*0.5-DOOR*0.5, WALL, DOOR);
-      ctx.fillRect(x0+ROOM_W-WALL, y0+ROOM_H*0.5-DOOR*0.5, WALL, DOOR);
+      if (!open.has('up')) ctx.fillRect(x0+ROOM_W*0.5-DOOR*0.5, y0, DOOR, WALL);
+      if (!open.has('down')) ctx.fillRect(x0+ROOM_W*0.5-DOOR*0.5, y0+ROOM_H-WALL, DOOR, WALL);
+      if (!open.has('left')) ctx.fillRect(x0, y0+ROOM_H*0.5-DOOR*0.5, WALL, DOOR);
+      if (!open.has('right')) ctx.fillRect(x0+ROOM_W-WALL, y0+ROOM_H*0.5-DOOR*0.5, WALL, DOOR);
     }
   }
 
