@@ -424,9 +424,7 @@ function step(dt){
   if (state.abilities.Shield.active>0) state.abilities.Shield.active-=dt;
 
   // room logic
-  ensureRoom();
-
-  // exit lock until clear
+  // capture current room before potential transition
   const rx = state.room.x, ry = state.room.y;
   const left = rx*ROOM_W, right=(rx+1)*ROOM_W, top=ry*ROOM_H, bottom=(ry+1)*ROOM_H;
   const enemiesInRoom = state.enemies.some(e => Math.floor(e.x/ROOM_W)===rx && Math.floor(e.y/ROOM_H)===ry);
@@ -437,26 +435,31 @@ function step(dt){
   const doorY1 = top + ROOM_H*0.5 - DOOR*0.5;
   const doorY2 = doorY1 + DOOR;
 
+  let dir = null;
   if (roomClear){
     state.cleared.add(roomKey(rx, ry));
-    let dir=null;
     if (state.player.x<left && state.player.y>doorY1 && state.player.y<doorY2){ dir='left'; }
     else if (state.player.x>right && state.player.y>doorY1 && state.player.y<doorY2){ dir='right'; }
     else if (state.player.y<top && state.player.x>doorX1 && state.player.x<doorX2){ dir='up'; }
     else if (state.player.y>bottom && state.player.x>doorX1 && state.player.x<doorX2){ dir='down'; }
-    if (dir){
-      ensureRoom();
-      const opp={left:'right',right:'left',up:'down',down:'up'};
-      const key=roomKey(state.room.x,state.room.y);
-      if(!state.openDoors.has(key)) state.openDoors.set(key,new Set());
-      state.openDoors.get(key).add(opp[dir]);
-    } else {
+    if (!dir){
       state.player.x = clamp(state.player.x, left+WALL, right-WALL);
       state.player.y = clamp(state.player.y, top+WALL,  bottom-WALL);
     }
   } else {
     state.player.x = clamp(state.player.x, left+WALL, right-WALL);
     state.player.y = clamp(state.player.y, top+WALL,  bottom-WALL);
+  }
+
+  // ensure room state reflects player position after potential move
+  ensureRoom();
+
+  // open entry door in the new room when transitioning
+  if (dir){
+    const opp={left:'right',right:'left',up:'down',down:'up'};
+    const key=roomKey(state.room.x,state.room.y);
+    if(!state.openDoors.has(key)) state.openDoors.set(key,new Set());
+    state.openDoors.get(key).add(opp[dir]);
   }
 
   // enemies
