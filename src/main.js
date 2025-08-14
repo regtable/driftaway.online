@@ -78,20 +78,38 @@ const META = Object.assign({
   goldRush:0,        // +drop chance
   wealthMult:0,      // +gold amount
   treasureHunter:0,  // chance for extra pile
+  shardMult:0,       // +shard amount
+  rapidFire:0,       // +fire rate
+  speedBoost:0,      // +move speed
+  vitality:0,        // +max hp
+  abilityMastery:0,  // -ability cooldowns
   endlessMight:0,    // +% damage permanent
   endlessGreed:0,    // +% gold permanent
-  shardMult:0
 }, loadMeta());
 
 // ------------------------------ Game state -------------------------------
-const ROOM_W=1200, ROOM_H=800;
+const ROOM_W=1200, ROOM_H=800, WALL=40, DOOR=160;
 
 let state = resetState();
 function resetState() {
+  const cdMult = Math.max(0.2, 1 - (META.abilityMastery||0)*0.05);
   return {
     running:false, paused:false, over:false,
     t:0, dt:0, last:now(),
-    player:{ x:ROOM_W*0.5, y:ROOM_H*0.5, vx:0, vy:0, spd:220, hp:5, hpMax:5, inv:0, dmg:1, proj:1, spread:6, fireDelay:0.28, fireAcc:0 },
+    player:{
+      x:ROOM_W*0.5,
+      y:ROOM_H*0.5,
+      vx:0, vy:0,
+      spd:220*(1+(META.speedBoost||0)*0.05),
+      hp:5+(META.vitality||0),
+      hpMax:5+(META.vitality||0),
+      inv:0,
+      dmg:1,
+      proj:1,
+      spread:6,
+      fireDelay:0.28/(1+(META.rapidFire||0)*0.05),
+      fireAcc:0
+    },
     cam:{x:ROOM_W*0.5,y:ROOM_H*0.5},
     room:{x:0,y:0},
     visited:new Set(),
@@ -99,11 +117,11 @@ function resetState() {
     enemies:[], bullets:[], ebullets:[], pickups:[], turrets:[],
     gold:0, depth:0,
     abilities:{
-      Dash:{owned:false, cd:0, baseCd:3, price:50},
-      Shield:{owned:false, cd:0, baseCd:12, price:80, active:0},
-      Nuke:{owned:false, cd:0, baseCd:18, price:120},
-      Heal:{owned:false, cd:0, baseCd:10, price:60},
-      Turret:{owned:false, cd:0, baseCd:14, price:100}
+      Dash:{owned:false, cd:0, baseCd:3*cdMult, price:50},
+      Shield:{owned:false, cd:0, baseCd:12*cdMult, price:80, active:0},
+      Nuke:{owned:false, cd:0, baseCd:18*cdMult, price:120},
+      Heal:{owned:false, cd:0, baseCd:10*cdMult, price:60},
+      Turret:{owned:false, cd:0, baseCd:14*cdMult, price:100}
     }
   };
 }
@@ -179,6 +197,11 @@ const metaDefs = [
   { key:'goldRush', name:'Gold Rush', desc:'+5% drop chance per level', base:10, step:1.22, show:()=>true },
   { key:'wealthMult', name:'Wealth Multiplier', desc:'+5% gold amount per level', base:12, step:1.22, show:()=>true },
   { key:'treasureHunter', name:'Treasure Hunter', desc:'10% chance for extra pile per level', base:16, step:1.26, show:()=>true },
+  { key:'shardMult', name:'Shard Hoarder', desc:'+5% shards per run', base:14, step:1.24, show:()=>true },
+  { key:'rapidFire', name:'Rapid Fire', desc:'+5% fire rate per level', base:18, step:1.25, show:()=>true },
+  { key:'speedBoost', name:'Swift Steps', desc:'+5% move speed per level', base:18, step:1.25, show:()=>true },
+  { key:'vitality', name:'Vitality', desc:'+1 max HP per level', base:20, step:1.28, show:()=>true },
+  { key:'abilityMastery', name:'Ability Mastery', desc:'-5% ability cooldowns per level', base:22, step:1.3, show:()=>true },
   { key:'endlessMight', name:'Endless Might', desc:'+1% permanent damage per level (infinite)', base:20, step:1.28, show:()=>true },
   { key:'endlessGreed', name:'Endless Greed', desc:'+1% permanent gold per level (infinite)', base:20, step:1.28, show:()=>true }
 ];
@@ -378,18 +401,27 @@ function step(dt){
   const enemiesInRoom = state.enemies.some(e => Math.floor(e.x/ROOM_W)===rx && Math.floor(e.y/ROOM_H)===ry);
   const roomClear = !enemiesInRoom;
 
+  const doorX1 = left + ROOM_W*0.5 - DOOR*0.5;
+  const doorX2 = doorX1 + DOOR;
+  const doorY1 = top + ROOM_H*0.5 - DOOR*0.5;
+  const doorY2 = doorY1 + DOOR;
+
   if (roomClear){
     state.cleared.add(roomKey(rx, ry));
     let crossed=false;
-    if (state.player.x<left){ state.player.x+=ROOM_W; crossed=true; }
-    if (state.player.x>right){ state.player.x-=ROOM_W; crossed=true; }
-    if (state.player.y<top){ state.player.y+=ROOM_H; crossed=true; }
-    if (state.player.y>bottom){ state.player.y-=ROOM_H; crossed=true; }
-    if (crossed) ensureRoom();
+    if (state.player.x<left && state.player.y>doorY1 && state.player.y<doorY2){ state.player.x+=ROOM_W; crossed=true; }
+    else if (state.player.x>right && state.player.y>doorY1 && state.player.y<doorY2){ state.player.x-=ROOM_W; crossed=true; }
+    else if (state.player.y<top && state.player.x>doorX1 && state.player.x<doorX2){ state.player.y+=ROOM_H; crossed=true; }
+    else if (state.player.y>bottom && state.player.x>doorX1 && state.player.x<doorX2){ state.player.y-=ROOM_H; crossed=true; }
+    if (crossed){
+      ensureRoom();
+    } else {
+      state.player.x = clamp(state.player.x, left+WALL, right-WALL);
+      state.player.y = clamp(state.player.y, top+WALL,  bottom-WALL);
+    }
   } else {
-    const m=18;
-    state.player.x = clamp(state.player.x, left+m, right-m);
-    state.player.y = clamp(state.player.y, top+m,  bottom-m);
+    state.player.x = clamp(state.player.x, left+WALL, right-WALL);
+    state.player.y = clamp(state.player.y, top+WALL,  bottom-WALL);
   }
 
   // enemies
@@ -485,13 +517,31 @@ function draw(){
   const targetY = cam.y - rect.height/2;
   ctx.translate(-targetX, -targetY);
 
-  // room frames near player
+  // room walls near player
   const rx=state.room.x, ry=state.room.y;
   const roomsToDraw=[[rx,ry],[rx+1,ry],[rx-1,ry],[rx,ry+1],[rx,ry-1]];
   for (const [x,y] of roomsToDraw){
     const x0=x*ROOM_W, y0=y*ROOM_H;
-    ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.lineWidth=4;
-    ctx.strokeRect(x0+10,y0+10, ROOM_W-20, ROOM_H-20);
+    const key=roomKey(x,y);
+    const cleared=state.cleared.has(key);
+    ctx.fillStyle='#1e293b';
+    // top & bottom walls
+    ctx.fillRect(x0, y0, ROOM_W*0.5-DOOR*0.5, WALL);
+    ctx.fillRect(x0+ROOM_W*0.5+DOOR*0.5, y0, ROOM_W*0.5-DOOR*0.5, WALL);
+    ctx.fillRect(x0, y0+ROOM_H-WALL, ROOM_W*0.5-DOOR*0.5, WALL);
+    ctx.fillRect(x0+ROOM_W*0.5+DOOR*0.5, y0+ROOM_H-WALL, ROOM_W*0.5-DOOR*0.5, WALL);
+    // left & right walls
+    ctx.fillRect(x0, y0, WALL, ROOM_H*0.5-DOOR*0.5);
+    ctx.fillRect(x0, y0+ROOM_H*0.5+DOOR*0.5, WALL, ROOM_H*0.5-DOOR*0.5);
+    ctx.fillRect(x0+ROOM_W-WALL, y0, WALL, ROOM_H*0.5-DOOR*0.5);
+    ctx.fillRect(x0+ROOM_W-WALL, y0+ROOM_H*0.5+DOOR*0.5, WALL, ROOM_H*0.5-DOOR*0.5);
+    if (!cleared){
+      ctx.fillStyle='#475569';
+      ctx.fillRect(x0+ROOM_W*0.5-DOOR*0.5, y0, DOOR, WALL);
+      ctx.fillRect(x0+ROOM_W*0.5-DOOR*0.5, y0+ROOM_H-WALL, DOOR, WALL);
+      ctx.fillRect(x0, y0+ROOM_H*0.5-DOOR*0.5, WALL, DOOR);
+      ctx.fillRect(x0+ROOM_W-WALL, y0+ROOM_H*0.5-DOOR*0.5, WALL, DOOR);
+    }
   }
 
   // gray overlay on cleared visited rooms (in/near viewport)
@@ -502,7 +552,7 @@ function draw(){
     const x0=vx*ROOM_W, y0=vy*ROOM_H;
     if (x0>viewL && x0<viewR && y0>viewT && y0<viewB && state.cleared.has(key)){
       ctx.fillStyle='rgba(148,163,184,0.12)';
-      ctx.fillRect(x0+10, y0+10, ROOM_W-20, ROOM_H-20);
+      ctx.fillRect(x0+WALL, y0+WALL, ROOM_W-WALL*2, ROOM_H-WALL*2);
     }
   }
 
