@@ -23,6 +23,8 @@ const meta = document.getElementById('meta');
 const metaGrid = document.getElementById('metaGrid');
 const deathSummary = document.getElementById('deathSummary');
 const toastMsg = document.getElementById('toastMsg');
+const updateToast = document.getElementById('updateToast');
+const loading = document.getElementById('loading');
 
 const runBtn = document.getElementById('runBtn');
 const pauseBtn = document.getElementById('pauseBtn');
@@ -59,6 +61,34 @@ const cd = {
   Heal: document.getElementById('cdHeal'),
   Turret: document.getElementById('cdTurret'),
 };
+
+// ----------------------------- Version check -----------------------------
+let currentVersion = null;
+function showUpdateToast(msg){
+  updateToast.textContent = msg;
+  updateToast.hidden = false;
+  setTimeout(()=>updateToast.hidden=true,10000);
+}
+async function checkVersion(initial = false){
+  try{
+    const res = await fetch('/version.json?'+Date.now());
+    const {version} = await res.json();
+    const stored = localStorage.getItem('appVersion');
+    if (initial && stored && stored !== version){
+      localStorage.setItem('appVersion', version);
+      location.reload();
+      return;
+    }
+    if (!initial && currentVersion && version !== currentVersion){
+      showUpdateToast('Game has been updated. Please restart to take effect.');
+    }
+    currentVersion = version;
+    localStorage.setItem('appVersion', version);
+  }catch{}
+  if (initial) loading?.remove();
+}
+checkVersion(true);
+setInterval(checkVersion, 60000);
 
 // ------------------------------ Utilities --------------------------------
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
