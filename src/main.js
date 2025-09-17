@@ -1,3 +1,5 @@
+import { ENGINES } from './engines.js';
+
 // ----------------------------- PWA register ------------------------------
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -20,7 +22,9 @@ const CTX = C.getContext('2d');
 const menu = document.getElementById('menu');
 const dead = document.getElementById('dead');
 const meta = document.getElementById('meta');
+const garage = document.getElementById('garage');
 const metaGrid = document.getElementById('metaGrid');
+const engineGrid = document.getElementById('engineGrid');
 const deathSummary = document.getElementById('deathSummary');
 const toastMsg = document.getElementById('toastMsg');
 
@@ -32,10 +36,13 @@ const menuMeta = document.getElementById('menuMeta');
 const deadMetaBtn = document.getElementById('deadMetaBtn');
 const metaBtn = document.getElementById('metaBtn');
 const closeMeta = document.getElementById('closeMeta');
+const engineBtn = document.getElementById('engineBtn');
+const closeGarage = document.getElementById('closeGarage');
 
 const goldEl = document.getElementById('gold');
 const shardsEl = document.getElementById('shards');
 const depthEl = document.getElementById('depth');
+const engineNameEl = document.getElementById('engineName');
 
 const statDMG = document.getElementById('statDMG');
 const statFR = document.getElementById('statFR');
@@ -83,21 +90,87 @@ const META = Object.assign({
   shardMult:0
 }, loadMeta());
 
+const ENGINE_KEY='rogue_engine_choice_v1';
+const loadEngineChoice=()=>{
+  try {
+    const id = localStorage.getItem(ENGINE_KEY);
+    if (id){
+      const found = ENGINES.find(e=>e.id===id);
+      if (found) return found;
+    }
+  } catch {}
+  return ENGINES[0];
+};
+const storeEngineChoice=(id)=>{ try { localStorage.setItem(ENGINE_KEY, id); } catch {} };
+let selectedEngine = loadEngineChoice();
+
+const BASE_PLAYER = { spd:220, hpMax:5, dmg:1, proj:1, spread:6, fireDelay:0.28 };
+
+function applyEngineModifiers(player, engine){
+  if (!engine || !engine.stats) return;
+  const s = engine.stats;
+  if (s.speedMult) player.spd *= s.speedMult;
+  if (s.speedAdd) player.spd += s.speedAdd;
+  if (s.damageMult) player.dmg *= s.damageMult;
+  if (s.fireDelayMult) player.fireDelay *= s.fireDelayMult;
+  if (s.fireDelayAdd) player.fireDelay += s.fireDelayAdd;
+  if (s.projectilesBonus) player.proj += s.projectilesBonus;
+  if (s.hpBonus) player.hpMax += s.hpBonus;
+  if (s.spreadAdd) player.spread += s.spreadAdd;
+}
+
+function buildPlayer(base){
+  const player = {
+    x: base?.x ?? 0,
+    y: base?.y ?? 0,
+    vx: base?.vx ?? 0,
+    vy: base?.vy ?? 0,
+    inv: base?.inv ?? 0,
+    fireAcc: base?.fireAcc ?? 0,
+    spd: BASE_PLAYER.spd,
+    hpMax: BASE_PLAYER.hpMax,
+    dmg: BASE_PLAYER.dmg,
+    proj: BASE_PLAYER.proj,
+    spread: BASE_PLAYER.spread,
+    fireDelay: BASE_PLAYER.fireDelay,
+    hp: BASE_PLAYER.hpMax,
+  };
+  applyEngineModifiers(player, selectedEngine);
+  player.spd = Math.max(60, player.spd);
+  player.hpMax = Math.max(1, Math.round(player.hpMax));
+  player.proj = Math.max(1, Math.round(player.proj));
+  player.spread = Math.max(0, player.spread);
+  player.fireDelay = Math.max(0.08, player.fireDelay);
+  const ratio = base && base.hpMax ? clamp(base.hp / base.hpMax, 0, 1) : 1;
+  player.hp = Math.max(1, Math.round(player.hpMax * ratio));
+  player.fireAcc = Math.min(player.fireDelay, player.fireAcc);
+  return player;
+}
+
 // ------------------------------ Game state -------------------------------
 const ROOM_W=1200, ROOM_H=800;
 
 let state = resetState();
 function resetState() {
+  const player = buildPlayer();
+  player.x = ROOM_W*0.5;
+  player.y = ROOM_H*0.5;
+  player.vx = 0;
+  player.vy = 0;
+  player.inv = 0;
+  player.fireAcc = 0;
+  player.hp = player.hpMax;
   return {
     running:false, paused:false, over:false,
     t:0, dt:0, last:now(),
-    player:{ x:ROOM_W*0.5, y:ROOM_H*0.5, vx:0, vy:0, spd:220, hp:5, hpMax:5, inv:0, dmg:1, proj:1, spread:6, fireDelay:0.28, fireAcc:0 },
+    player,
     cam:{x:ROOM_W*0.5,y:ROOM_H*0.5},
     room:{x:0,y:0},
     visited:new Set(),
     cleared:new Set(),
     enemies:[], bullets:[], ebullets:[], pickups:[], turrets:[],
     gold:0, depth:0,
+    engineId:selectedEngine ? selectedEngine.id : null,
     abilities:{
       Dash:{owned:false, cd:0, baseCd:3, price:50},
       Shield:{owned:false, cd:0, baseCd:12, price:80, active:0},
@@ -114,7 +187,7 @@ window.addEventListener('keydown', e=>{
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
   keys.add(e.key.toLowerCase());
   if (e.key==='p' || e.key==='P') togglePause();
-  if (e.key==='m' || e.key==='M') openMeta(true);
+  if (e.key==='m' || e.key==='M'){ openGarage(false); openMeta(true); }
   if (state.running && !state.paused){
     if (e.key==='1') useAbility('Dash');
     if (e.key==='2') useAbility('Shield');
@@ -132,15 +205,26 @@ function uiSync(){
   depthEl.textContent = state.depth|0;
 
   const goldMult = 1 + META.wealthMult*0.05 + META.endlessGreed*0.01;
-  statDMG.textContent = ((1+META.endlessMight*0.01)*100|0) + '%';
+  const dmgMult = state.player.dmg * (1 + META.endlessMight*0.01);
+  statDMG.textContent = Math.round(dmgMult*100)+'%';
   statFR.textContent = (1/state.player.fireDelay).toFixed(2)+'/s';
   statProj.textContent = state.player.proj|0;
   statSpread.textContent = (state.player.spread|0)+'°';
-  statSpd.textContent = (state.player.spd/220*100|0)+'%';
+  statSpd.textContent = Math.round(state.player.spd/BASE_PLAYER.spd*100)+'%';
   statHP.textContent = state.player.hpMax|0;
   statGoldMult.textContent = goldMult.toFixed(2)+'×';
   const shardMult=1+(META.shardMult||0)*0.05;
   statShardMult.textContent = shardMult.toFixed(2)+'×';
+
+  if (engineNameEl){
+    if (selectedEngine){
+      engineNameEl.textContent = selectedEngine.name;
+      engineNameEl.title = `${selectedEngine.manufacturer} • ${selectedEngine.induction.join(', ')} • ${selectedEngine.application}`;
+    } else {
+      engineNameEl.textContent = '--';
+      engineNameEl.title = '';
+    }
+  }
 
   const depthScale = 1 + state.depth*0.02;
   for (const k of Object.keys(state.abilities)){
@@ -168,10 +252,12 @@ runBtn.onclick=()=>startRun();
 pauseBtn.onclick=()=>togglePause();
 menuRun.onclick=()=>{menu.style.display='none'; startRun();}
 againBtn.onclick=()=>{dead.style.display='none'; startRun();}
-menuMeta.onclick=()=>openMeta(true);
-deadMetaBtn.onclick=()=>openMeta(true);
-metaBtn.onclick=()=>openMeta(true);
+menuMeta.onclick=()=>{ openGarage(false); openMeta(true); };
+deadMetaBtn.onclick=()=>{ openGarage(false); openMeta(true); };
+metaBtn.onclick=()=>{ openGarage(false); openMeta(true); };
 closeMeta.onclick=()=>openMeta(false);
+engineBtn?.addEventListener('click', ()=>{ openMeta(false); openGarage(true); });
+closeGarage?.addEventListener('click', ()=>openGarage(false));
 
 // -------------------------- Meta upgrades shop ---------------------------
 const metaDefs = [
@@ -221,6 +307,97 @@ function openMeta(open){
   if (open) drawMeta();
 }
 
+// --------------------------- Engine garage -----------------------------
+function equipEngine(engine){
+  if (!engine) return;
+  if (selectedEngine && selectedEngine.id===engine.id) return;
+  selectedEngine = engine;
+  storeEngineChoice(engine.id);
+  if (state && state.player){
+    const next = buildPlayer(state.player);
+    next.x = state.player.x;
+    next.y = state.player.y;
+    next.vx = state.player.vx;
+    next.vy = state.player.vy;
+    next.inv = state.player.inv;
+    state.player = next;
+    state.engineId = engine.id;
+  }
+  uiSync();
+}
+
+function engineEffectText(engine){
+  const s = engine.stats || {};
+  const lines = [];
+  if (s.speedMult && Math.abs(s.speedMult-1)>0.001){
+    const pct = Math.round((s.speedMult-1)*100);
+    lines.push(`${pct>=0?'+':''}${pct}% Move Speed`);
+  }
+  if (s.damageMult && Math.abs(s.damageMult-1)>0.001){
+    const pct = Math.round((s.damageMult-1)*100);
+    lines.push(`${pct>=0?'+':''}${pct}% Damage`);
+  }
+  if (s.fireDelayMult && Math.abs(s.fireDelayMult-1)>0.001){
+    const pct = Math.round(((1/s.fireDelayMult)-1)*100);
+    lines.push(`${pct>=0?'+':''}${pct}% Fire Rate`);
+  }
+  if (s.projectilesBonus){
+    const amt = s.projectilesBonus;
+    lines.push(`${amt>0?'+':''}${amt} Projectile${Math.abs(amt)===1?'':'s'}`);
+  }
+  if (s.hpBonus){
+    lines.push(`${s.hpBonus>0?'+':''}${s.hpBonus} Max HP`);
+  }
+  if (s.spreadAdd && Math.abs(s.spreadAdd)>0.05){
+    const deg = Math.round(s.spreadAdd*10)/10;
+    lines.push(`${deg>=0?'+':''}${deg}° Spread`);
+  }
+  return lines;
+}
+
+function drawGarage(){
+  if (!engineGrid) return;
+  engineGrid.innerHTML='';
+  for (const engine of ENGINES){
+    const card=document.createElement('div');
+    const active = selectedEngine && selectedEngine.id===engine.id;
+    card.className='engine-card'+(active?' selected':'');
+    const badges = (engine.induction||[]).map(t=>`<span class="badge">${t}</span>`).join('');
+    const effects = engineEffectText(engine);
+    const effectText = effects.length ? effects.join(', ') : 'Factory tune — no stat changes.';
+    const vehicles = (engine.vehicles||[]).join(', ');
+    const hp = engine.output && typeof engine.output.hp!=='undefined' ? engine.output.hp : '?';
+    const torque = engine.output && typeof engine.output.torque!=='undefined' ? engine.output.torque : '?';
+    card.innerHTML=`
+      <div class="engine-header">
+        <div>
+          <div class="engine-name">${engine.name}</div>
+          <div class="engine-sub">${engine.manufacturer} • ${engine.application}</div>
+        </div>
+        <div class="engine-meta">${badges}</div>
+      </div>
+      <p class="engine-desc">${engine.description}</p>
+      <div class="engine-stats">
+        <div><span class="label">Output</span>${hp} hp / ${torque} lb-ft</div>
+        <div><span class="label">Effects</span>${effectText}</div>
+        <div><span class="label">Notable Uses</span>${vehicles}</div>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button class="btn ok">${active?'Equipped':'Equip'}</button>
+      </div>`;
+    const btn = card.querySelector('button');
+    if (active) btn.disabled=true;
+    btn.addEventListener('click', ()=>{ equipEngine(engine); drawGarage(); });
+    engineGrid.appendChild(card);
+  }
+}
+
+function openGarage(open){
+  if (!garage) return;
+  garage.style.display = open?'flex':'none';
+  if (open) drawGarage();
+}
+
 // --------------------------- Room & spawning -----------------------------
 function roomKey(x,y){ return x+'_'+y; }
 function currentRoomXY(){ return {x:Math.floor(state.player.x/ROOM_W), y:Math.floor(state.player.y/ROOM_H)}; }
@@ -268,10 +445,11 @@ function autoShoot(dt){
   const {e} = nearest;
   const ang = Math.atan2(e.y - state.player.y, e.x - state.player.x);
   const spreadDeg = state.player.spread;
+  const baseDmg = state.player.dmg * (1+META.endlessMight*0.01);
   for (let i=0;i<state.player.proj;i++){
     const off = (i - (state.player.proj-1)/2) * (spreadDeg*Math.PI/180);
     const a = ang + off;
-    state.bullets.push({x:state.player.x, y:state.player.y, vx:Math.cos(a)*520, vy:Math.sin(a)*520, dmg:(1+META.endlessMight*0.01)});
+    state.bullets.push({x:state.player.x, y:state.player.y, vx:Math.cos(a)*520, vy:Math.sin(a)*520, dmg:baseDmg});
   }
 }
 function damagePlayer(d){
@@ -289,7 +467,9 @@ function gameOver(){
   META.shards += Math.floor(shardsGained*shardMult);
   storeMeta(META);
   shardsEl.textContent = META.shards|0;
-  deathSummary.textContent = `Depth ${state.depth} — +${Math.floor(shardsGained*shardMult)} ✦ (Total ${META.shards|0})`;
+  const engineUsed = ENGINES.find(e=>e.id===state.engineId) || selectedEngine;
+  const engineLabel = engineUsed ? engineUsed.name : 'Factory Spec 2.0L Turbo';
+  deathSummary.textContent = `Depth ${state.depth} — +${Math.floor(shardsGained*shardMult)} ✦ — Engine: ${engineLabel} (Total ${META.shards|0})`;
   dead.style.display='flex';
 }
 function dropGold(x,y,amount){
@@ -345,7 +525,7 @@ function useAbility(name){
 // --------------------------------- Loop ----------------------------------
 function startRun(){
   state = resetState();
-  menu.style.display='none'; dead.style.display='none'; meta.style.display='none';
+  menu.style.display='none'; dead.style.display='none'; meta.style.display='none'; openGarage(false);
   state.running=true; state.paused=false; pauseBtn.textContent='Pause';
   state.room={x:0,y:0}; state.visited=new Set(); state.cleared=new Set(); state.visited.add(roomKey(0,0));
   spawnRoom(0,0);
@@ -409,7 +589,8 @@ function step(dt){
       const target = state.enemies[0];
       if (target){
         const ang=Math.atan2(target.y-t.y,target.x-t.x);
-        state.bullets.push({x:t.x,y:t.y,vx:Math.cos(ang)*520,vy:Math.sin(ang)*520,dmg:(0.8+META.endlessMight*0.01)});
+        const turretDmg = (0.8+META.endlessMight*0.01) * state.player.dmg;
+        state.bullets.push({x:t.x,y:t.y,vx:Math.cos(ang)*520,vy:Math.sin(ang)*520,dmg:turretDmg});
       }
     }
   }
